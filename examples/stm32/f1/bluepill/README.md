@@ -3,10 +3,10 @@
 These examples target a generic STM32F103C8T6 based development board commonly
 known as the "Bluepill".
 
-These boards are readily available from sources like AliExpress or E-Bay for a 
+These boards are readily available from sources like AliExpress or E-Bay for a
 couple of dollars (search for stm32 bluepill or stm32f103c8t6). Flashing these
 projects are set up to use OpenOCD and a ST-link programmer or clone.
-OpenOCD is free software and an ST-link programmer clone is available from the 
+OpenOCD is free software and an ST-link programmer clone is available from the
 same sources, again for a couple of dollars (search for "stlink v2")
 Some sellers even sell a combo (a bluepill and a stlink).
 
@@ -16,18 +16,17 @@ These examples show the implementation of the OpenCM3 library. I presume you
 are able to code in C, have some rudimentary microcontroller knowledge and
 know your way around your own computer. Specifically I leave it to you to set
 up your toolchain, flasher software, editor/IDE and the like. If you are
-familiar with the "make" command and have some way of executing "make" using 
+familiar with the "make" command and have some way of executing "make" using
 an arm toolchain and know how to set up and run your flasher software
 (ie OpenOCD or st-flash) you should be fine.
 
 Along with these examples it will pay to have the ST Reference Manual (RM0008)
 and the libopencm3 documentation at your fingertips. Download the RM0008 from
-the ST website and build the libopencm3 documentation in the libopencm3 
+the ST website and build the libopencm3 documentation in the libopencm3
 subdirectory.
 
 Also usefull is a schematic of the dev board and a pinout diagram. Both can be
 found on the web (search terms "blue pill pinout" and "blue pill schematics").
-
 
 ## Programmer and board setup
 
@@ -41,36 +40,68 @@ get the most out of these examples if you study and try these examples in order.
 
 To flash your program to the board use the **bp-flash** target (make bp-flash).
 
+## The STM32F10 family
+
+The Bluepill contains a ARM Cortex-M3 derived microcontroller designed and manufactured
+by ST. Disection the full part number STM32F103C8T6 gives us the following:
+
+- STM32 : This is an ARM-base 32-bit microcontroller
+- F : A general purpose microcontroller
+- 103 : This part belongs to the performance line of the STM32F10 family
+- C : the pin count is 48 pins, it is a medium density part
+- 8 : the part contains 64 Kbytes of flash
+- T : the package of the part is a LQFP
+- 6 : The part is designed to operate between -40 to 85 degrees Celcius.
+
+The most important thing to remember when you read the datasheets is the fact that
+this is a medium density device using the Cortex-M3 architecture.
+
 ## Example list
 
 ### Fancyblink
 
-When you apply power to an STM32F103 it will use the internal 8Mhz clock.
-This example shows how to configure the Reset and Clock Control (RCC) to
-use the blue pill's external 8Mhz crystal.
+The main purpose of this example is to introduce you to Reset and Clock Control (RCC).
 
-By default the pins used by the programmer to access the STM32F103
-(SWDCLK (PA14) and SWDIO (PA13)) are set to be general purpose IO.
+The STM32F10xxx line of microcontrollers has multiple clocks, multiple busses that
+can connect to different clock sources with a variety of clock divisers.
+All this is highly configurable.
+When the microcontroller starts up, a default configuration is applied. This default
+configuration is not your desired configuration in almost all situations.
+This makes configuring the RCC the highest priority on startup.
 
-This means that, without the proper precautions, we can only flash our program 
+The default configuration uses the internal 8Mhz clock and disables all pheripheral
+clock sources. This example shows how to configure the Reset and Clock Control (RCC)
+to use the blue pill's external 8Mhz crystal and turn the required peripherals on.
+Additionally it configures GPIO/AFIO pheripherals to use the SWD function on PA13 and
+PA14 and a led output on PC13.
+
+By default, both JTAG and SWD are enabled but require a specific sequence in order to
+be activated. In the setup I described, the clone programmer does not send this sequence.
+This means that, without the proper precautions, we can only flash our program
 once. In order to reflash a new program we have to play with the BOOT0 pin.
 It can be done but is inconvenient.
 
-The solution is to remap these pins and configure them properly, so we can take
-control of the board without having to change jumpers.
+The solution is to force a SWD configuration, so we can take control of the board without
+having to change jumpers.
 As an added bonus we will be able to debug our program on the board.
-
-So the fancyblink program remaps the pins and configures the AFIO block by
-reprogramming the AFIO_MAPR register. An added gotcha is that, by default,
-all peripherals are disabled. Thus we need to enable the AFIO clock.
+So the fancyblink program remaps the pins by reprogramming the AFIO_MAPR register. By selecting
+to enable only SWD we ensure that PA15, PB3 and PB4 can be utilised for other purposes.
+We also need to ensure that a clock is routed to the AFIO block.
+This is done by configuring the RCC block by using the `rcc_periph_clock_enable` calls
 
 The rest is relatively simple. To blink the led (attached to port C, pin 13) we
-need to configure the appropriate GPIO port, ie turn on the port's clock and
-configure the pin to be an output.
+need to configure the appropriate GPIO port,
+We configure PC13 to be a low speed push/pull output, and turn on the clock to Port C.
 
 In the main function we toggle the LED and wait a while. Repeat ad infinitum.
 
 ### TimedBlink
+
+Next to GPIO, timers are probably the most ubiques pheripheral in micro controllers.
+
+The whole family offers three different kinds of timers; basic, general purpose and
+advanced control. There are up to 14 independent timers possible. Our microcontroller
+is more modest and has four timers, one advanced control (TIM1) and three general purpose timer (TIM2 to TIM4).
 
 In this example we use a general purpose timer peripheral to better control
 the timing of the led toggle.
@@ -99,7 +130,7 @@ time base for your firmware to use.
 The easiest way to use the systick timer is to set the frequency, enable interrupts
 and set it running.
 
-The ISR we have defined here is `void sys_tick_handler(void)` which is defined in 
+The ISR we have defined here is `void sys_tick_handler(void)` which is defined in
 *libopencm3/lib/cm3/vector.c*
 
 ### ControlledBlink

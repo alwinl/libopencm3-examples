@@ -17,9 +17,7 @@
 ## along with this library.  If not, see <http://www.gnu.org/licenses/>.
 ##
 
-BINARY = serialblink
-
-OBJS = usbserial.o
+BINARY = pwmblink
 
 LDSCRIPT = ../bluepill.ld
 

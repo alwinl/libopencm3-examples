@@ -19,25 +19,44 @@
 
 #include <libopencm3/stm32/rcc.h>
 #include <libopencm3/stm32/gpio.h>
+#include <libopencm3/stm32/adc.h>
 #include <libopencm3/cm3/nvic.h>
 #include <libopencm3/cm3/systick.h>
 
 #include "./usbserial.h"
 
+#include <stdio.h>
 #include <string.h>
 
 uint32_t sys_ticks = 0;
 
+/*
+ * Setup functions
+ */
 static void clock_setup(void)
 {
 	/* Use a High Speed External 8Mhz crystal and run at 72Mhz */
 	rcc_clock_setup_pll(&rcc_hse_configs[RCC_CLOCK_HSE8_72MHZ]);
 
 	rcc_periph_clock_enable(RCC_AFIO);	/* Enable AFIO clock. */
-	rcc_periph_clock_enable(RCC_GPIOC); /* Enable GPIOC clock. */
-	
+	rcc_periph_clock_enable(RCC_GPIOC);	/* Enable GPIOC clock. */
+	rcc_periph_clock_enable(RCC_ADC1);	/* Enable ADC clock. */
+
 	/* The system clock is running at 72MHz, so we divide the clock by 1.5 to get a USB speed of 48MHz */
 	rcc_set_usbpre( RCC_CFGR_USBPRE_PLL_CLK_DIV1_5 );
+	
+	/* The ADC maximum speed is 14Mhz, we set the divider to 6 to get the clock running at 12Mhz */
+	rcc_set_adcpre( RCC_CFGR_ADCPRE_DIV6 );
+}
+
+static void systick_setup(void)
+{
+#define tick_frequency (1000)		/* 1ms period equals 1 kHz */
+#define AHB_frequency (72000000)	/* system running at 72 Mhz */
+
+	systick_set_frequency( tick_frequency, AHB_frequency );
+	systick_counter_enable();
+	systick_interrupt_enable();
 }
 
 static void gpio_setup(void)
@@ -52,14 +71,38 @@ static void gpio_setup(void)
 	gpio_clear(GPIOC, GPIO13);	/* Switch on LED. */
 }
 
-static void systick_setup(void)
+static void adc_setup( void )
 {
-#define tick_frequency (1000)		/* 1ms period equals 1 kHz */
-#define AHB_frequency (72000000)	/* system running at 72 Mhz */
+	/* Make sure the ADC doesn't run during config. */
+	adc_power_off(ADC1);
 
-	systick_set_frequency( tick_frequency, AHB_frequency );
-	systick_counter_enable();
-	systick_interrupt_enable();
+	/* We configure everything for one single injected conversion. */
+	adc_disable_scan_mode(ADC1);
+	adc_set_single_conversion_mode(ADC1);
+	/* We can only use discontinuous mode on either the regular OR injected channels, not both */
+	adc_disable_discontinuous_mode_regular(ADC1);
+	adc_enable_discontinuous_mode_injected(ADC1);
+	/* We want to start the injected conversion in software */
+	adc_enable_external_trigger_injected(ADC1,ADC_CR2_JEXTSEL_JSWSTART);
+	adc_set_right_aligned(ADC1);
+	
+	/* We want to read the temperature sensor, so we have to enable it. */
+	adc_enable_temperature_sensor();
+	adc_set_sample_time_on_all_channels(ADC1, ADC_SMPR_SMP_28DOT5CYC);
+
+	adc_power_on(ADC1);
+
+	/* Wait for ADC to start up. */
+	for( uint32_t start = sys_ticks; sys_ticks == start; )	/* wait one milli second, we only have to wait 2 ADC clock ticks so this is more than enough */
+		__asm__("nop");
+		
+	adc_reset_calibration(ADC1);
+	adc_calibrate(ADC1);
+
+	/* Select the channel(s) we want to convert. 16 = temperature_sensor. */
+	uint8_t channel_array[16] = {16};
+
+	adc_set_injected_sequence( ADC1, 1, channel_array );	/* Set the injected sequence here, with number of channels */
 }
 
 static void setup( void )
@@ -68,8 +111,13 @@ static void setup( void )
 	systick_setup();
 	gpio_setup();
 	usb_setup();
+	adc_setup();
 }
 
+/* 
+ * interrrupt handlers
+ */
+ 
 void sys_tick_handler( void )
 {
 	++sys_ticks;
@@ -77,9 +125,9 @@ void sys_tick_handler( void )
 
 /* LED functionality */
 
-typedef enum { ON = 0, OFF, SLOW, NORMAL, FAST } mode_t;
+typedef enum { ON = 0, OFF, SLOW, NORMAL, FAST } led_mode_t;
 
-static void led_loop( mode_t mode )
+static void led_loop( led_mode_t mode )
 {
 	static uint32_t start_counter = 0;
 	uint16_t timeout = 0;
@@ -110,8 +158,59 @@ static void led_loop( mode_t mode )
 	start_counter = sys_ticks;
 }
 
+/*
+ * ADC functionality
+ */
+static void adc_start_loop( void )
+{
+	static uint32_t adc_counter = 0;
+	
+	if( sys_ticks - adc_counter < 1000 ) /* still waiting for timeout to pass */
+		return;
+		
+	adc_start_conversion_injected( ADC1 );
+		
+	adc_counter = sys_ticks;
+}
 
+static void adc_process_loop( void )
+{
+	if( !adc_eoc_injected( ADC1 ) )	/* Wait for end of conversion. */
+		return;
+		
+	adc_clear_flag( ADC1, ADC_SR_JEOC );	 // clear injected end of conversion
+	
+	/* STM32F103x8_xB Datasheet page 79 */
+#define AVG_SLOPE 0.0043		/* Volts per degree Celcius */
+#define V25 1.43
 
+#define VOLTS_PER_ADCCODE (3.3 / 4096)
+
+	uint8_t pos = 0;
+	char buffer[50] = "                ";
+
+	uint16_t adc_reading = adc_read_injected( ADC1, 1 ); // get the result from ADC_JDR1 on ADC1 (only bottom 12bits)
+	float Vsense = (float)adc_reading * VOLTS_PER_ADCCODE;
+	
+	if(  Vsense < 2.0 ) {
+		pos = snprintf( buffer, 50, " - Under voltage %d %f\r", adc_reading, Vsense );
+		usb_write( buffer, pos );
+	} else if( Vsense > 3.3 ) {
+		pos = snprintf( buffer, 50, " - Over voltage %f\r", Vsense );
+		usb_write( buffer, pos );
+	} else {
+	
+		float temperature = 25 + ( V25 - Vsense ) / AVG_SLOPE;	/* RM0008 page 236 */
+		
+		pos = snprintf( buffer, 50, " - %f Celcius\r", temperature );
+		
+		usb_write( buffer, pos );
+	}
+}
+
+/*
+ * USB functionality
+ */
 static char * messages[] = 
 {
 	"Turned the LED on\n\r",
@@ -134,7 +233,7 @@ static char * startup_message =
 	"\n\r"
 };
 
-static mode_t usb_loop( mode_t mode )
+static led_mode_t usb_loop( led_mode_t mode )
 {
 	char usb_buffer[64];
 	int rx_bytes;
@@ -166,15 +265,19 @@ static mode_t usb_loop( mode_t mode )
 	return mode;
 }
 
-
-int main(void)
+/*
+ * Outer program loop
+ */
+int main( void )
 {
-	mode_t mode = NORMAL;
+	led_mode_t mode = NORMAL;
 	
 	setup();
 	
-	while (1) {
+	while( 1 ) {
+		adc_start_loop();
 		led_loop( mode );
+		adc_process_loop();
 		mode = usb_loop( mode );
 	}
 

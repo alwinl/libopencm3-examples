@@ -27,7 +27,11 @@ include ../../Makefile.include
 
 bp-flash: $(BINARY).bp-flash
 
+debug: $(BINARY).debug
+
 %.bp-flash: %.elf
 	@printf "  FLASH   $<\n"
 	$(OOCD) -f $(OOCD_FILE) -c "program $(*).elf verify reset exit"
 
+%.debug: %.elf
+	../debug.sh $(BINARY).elf

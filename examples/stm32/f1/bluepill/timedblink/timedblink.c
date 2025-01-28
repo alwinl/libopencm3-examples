@@ -35,7 +35,7 @@ static void clock_setup( void )
 static void gpio_setup( void )
 {
 	/* Ensure we can use SWD after we have flashed this binary */
-	gpio_primary_remap( AFIO_MAPR_SWJ_CFG_FULL_SWJ_NO_JNTRST, 0 );
+	gpio_primary_remap( AFIO_MAPR_SWJ_CFG_JTAG_OFF_SW_ON, 0 );
 
 	/* Set GPIO13 (in GPIO port C) to 'output push-pull'. */
 	gpio_set_mode( GPIOC, GPIO_MODE_OUTPUT_50_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, GPIO13 );
