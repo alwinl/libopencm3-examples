@@ -17,23 +17,21 @@
 ## along with this library.  If not, see <http://www.gnu.org/licenses/>.
 ##
 
-BINARY = serialblink
+all:
+	make -C fancyblink
+	make -C timedblink
+	make -C interruptblink
+	make -C systickblink
+	make -C pwmblink
+	make -C controlledblink
+	make -C serialblink
 
-OBJS = usbserial.o
+clean:
 
-LDSCRIPT = ../bluepill.ld
-
-OOCD_FILE = ../bluepill.cfg
-
-include ../../Makefile.include
-
-bp-flash: $(BINARY).bp-flash
-
-debug: $(BINARY).debug
-
-%.bp-flash: %.elf
-	@printf "  FLASH   $<\n"
-	$(OOCD) -f $(OOCD_FILE) -c "program $(*).elf verify reset exit"
-
-%.debug: %.elf
-	../debug.sh $(BINARY).elf
+	make -C fancyblink clean
+	make -C timedblink clean
+	make -C interruptblink clean
+	make -C systickblink clean
+	make -C pwmblink clean
+	make -C controlledblink clean
+	make -C serialblink clean

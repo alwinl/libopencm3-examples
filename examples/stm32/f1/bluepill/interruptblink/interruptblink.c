@@ -36,7 +36,7 @@ static void clock_setup( void )
 static void gpio_setup(void)
 {
 	/* Ensure we can use SWD after we have flashed this binary */
-	gpio_primary_remap( AFIO_MAPR_SWJ_CFG_FULL_SWJ_NO_JNTRST, 0 );
+	gpio_primary_remap( AFIO_MAPR_SWJ_CFG_JTAG_OFF_SW_ON, 0 );
 
 	/* Set GPIO13 (in GPIO port C) to 'output push-pull'. */
 	gpio_set_mode( GPIOC, GPIO_MODE_OUTPUT_50_MHZ, GPIO_CNF_OUTPUT_PUSHPULL, GPIO13 );
@@ -59,9 +59,9 @@ static void timer_setup( void )
 
 	timer_set_prescaler( TIM2, 36000 - 1 );
 	timer_set_period( TIM2, 1000 );	/* auto reload register */
-	
+
 	timer_enable_irq( TIM2, TIM_DIER_UIE );
-	
+
 	timer_enable_counter( TIM2 );
 }
 
@@ -75,17 +75,17 @@ static void setup( void )
 void tim2_isr( void )
 {
 	gpio_toggle( GPIOC, GPIO13 );	/* LED on/off */
-	
+
 	/* Note: We cannot use timer_clear_flag here
 	 * timer_clear_flag sets the status register to the (inverted) passed parameter,
 	 * it does not AND the register with the  (inverted) passed parameter.
-	 * 
+	 *
 	 * ie, libopencm3 does
 	 * 		TIM_SR(handle) = ~parameter;
 	 * instead of
 	 * 		TIM_SR(handle) &= ~parameter;
-	 * 
-	 * This seems to make a difference
+	 *
+	 * This does make a difference to the other bits
 	 */
 	//timer_clear_flag( TIM2, TIM_SR_UIF );
 	TIM_SR(TIM2) &= ~TIM_SR_UIF;	/* it is our responsibility to clear the flag */
@@ -94,7 +94,7 @@ void tim2_isr( void )
 int main(void)
 {
 	setup();
-	
+
 	while( 1 ) {
 		/* do nothing */
 	}
